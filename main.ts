@@ -1,134 +1,132 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { Plugin } from 'obsidian'
+import { SurveySettingTab } from "./SettingTab";
+import { randomTimeRange } from "./startupTasks";
+import { PopulateJsonFireStore } from "/Users/amer_/Desktop/Plugin Development Environment/Plugin Development/.obsidian/plugins/Survey Plugin/firebaseSetup/firebase";
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+interface PluginSettings {
+	timeRange: string;
+	callCount:string;
+	templateDir: string;
+	activeDay: Array<number>;
+	times: Array<{hour:number,minute:number}>;
+	mainDir: string;
 }
-
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+export const DEFAULT_SETTINGS: Partial<PluginSettings> = {
+	timeRange:"8:00-17:00",
+	callCount: "2",
+	templateDir: "templates",
+	mainDir: "surveys",
 }
-
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
+export default class ExamplePlugin extends Plugin {
+	statusBarTextElement: HTMLElement;
+	settings: PluginSettings;
+	populateFireStore = new PopulateJsonFireStore();
+	initTimes() {
+		//we need to check if we've already randomized the time for the date, if we haven't, we need to do so
+		let today = new Date();
+		let date = [today.getDate(), today.getMonth() + 1, today.getFullYear()];
+		// first check if we've defined the active day
+		let dayCondition =
+			JSON.stringify(this.settings.activeDay) == JSON.stringify(date);
+		if (this.settings.activeDay == undefined) {
+			this.settings.activeDay = date;
+			this.settings.times = randomTimeRange(
+				this.settings.timeRange,
+				parseInt(this.settings.callCount)
+			);
+			this.saveSettings();
+		}
+		// check if the indecies in active day are the same as the date
+		else if (!dayCondition) {
+			console.log("we have not seen this day before");
+			console.log(this.settings.activeDay);
+			console.log(date);
+			console.log(dayCondition);
+			this.settings.activeDay = date;
+			this.settings.times = randomTimeRange(
+				this.settings.timeRange,
+				parseInt(this.settings.callCount)
+			);
+			console.log(this.settings.times);
+			this.saveSettings();
+		} else if (
+			parseInt(this.settings.callCount) != this.settings.times.length
+		) {
+			this.settings.times = randomTimeRange(
+				this.settings.timeRange,
+				parseInt(this.settings.callCount)
+			);
+			this.saveSettings();
+		} else {
+			console.log("we have seen this day before");
+			console.log(this.settings.times);
+		}
+	}
+	surveyDirectoryConstructor(directory: string, date: Date) {
+		console.log("here");
+		let [day, month, year] = [
+			date.getDate(),
+			date.getMonth(),
+			date.getFullYear(),
+		];
+		// We want to check if there is a directory for the year, and if not make one
+		let months = [
+			"January",
+			"February",
+			"March",
+			"April",
+			"May",
+			"June",
+			"July",
+			"August",
+			"September",
+			"October",
+			"November",
+			"December",
+		];
+		let yearDirectory = `${directory}/${year}`;
+		let monthDirectory = `${yearDirectory}/${months[month]}`;
+		let dayDirectory = `${monthDirectory}/${day}`;
+		let directories = [yearDirectory, monthDirectory, dayDirectory];
+		for (let i = 0; i < directories.length; i++) {
+			this.app.vault.adapter.exists(directories[i]).then((exists) => {
+				console.log("here2");
+				this.app.vault.adapter.mkdir(directories[i]);
+			});
+		}
+		return dayDirectory;
+		// go through all the directories in the folder, if they don't exist, make them
+	}
 	async onload() {
+		// access the data.json file that stores the settings
+
+		// we need to save the active day
+
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		this.populateFireStore.populate();
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+		this.addSettingTab(new SurveySettingTab(this.app, this));
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		// get the local obsidian directory
+		const obsidianDir = this.app.vault.getRoot().path;
+		let surveyDir = obsidianDir + "/" + "surveys";
+		console.log(this.surveyDirectoryConstructor(surveyDir, new Date()));
+		this.initTimes();
 	}
-
-	onunload() {
-
+	async loadSettings(): Promise<void> {
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
 	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
-
-	async saveSettings() {
+	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+		this.populateFireStore.populate();
+		// when we hit the save settings button, this will wait until the data is ready to be saved
 	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-	}
+	// In typescript, as in the type, we now have types. When we're working, it's easier to define variables as the
+	// objects we can manipulate for readability and manipulation. if we're defining a type, define corresponding to
+	// definition's output
 }
